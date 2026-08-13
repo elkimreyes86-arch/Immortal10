@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Immortal Proxy · v2</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0d0d0d;color:#00ff66;font-family:'Courier New',monospace;padding:12px;height:100vh;display:flex;flex-direction:column}
+  header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #00ff66;padding-bottom:8px;flex-wrap:wrap}
+  h1{font-size:1.6rem;letter-spacing:3px;text-shadow:0 0 12px #00ff6680}
+  .badge{color:#00cc44;font-size:0.8rem;border:1px solid #00ff6633;padding:2px 10px;border-radius:12px}
+  .toolbar{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;align-items:center}
+  #urlbar{flex:4;min-width:200px;padding:10px 14px;background:#1a1a1a;border:2px solid #00ff66;color:#00ff66;font-size:1rem;border-radius:6px;outline:none;font-family:inherit}
+  #urlbar:focus{border-color:#00ffaa;box-shadow:0 0 16px #00ff6644}
+  .btn{background:#00ff66;color:#000;border:none;padding:10px 24px;font-weight:bold;border-radius:6px;font-size:1rem;cursor:pointer;transition:0.15s;font-family:inherit}
+  .btn:hover{background:#00dd55;transform:scale(0.97)}
+  .btn.sec{background:#222;color:#00ff66;border:1px solid #00ff66}
+  .btn.sec:hover{background:#2a2a2a}
+  .btn.small{padding:6px 14px;font-size:0.8rem}
+  .status-bar{display:flex;gap:16px;flex-wrap:wrap;font-size:0.75rem;color:#009933;margin-bottom:6px;align-items:center}
+  .status-bar span{background:#111;padding:2px 10px;border-radius:10px;border:1px solid #00ff6622}
+  .frame-wrap{flex:1;border:2px solid #00ff66;border-radius:8px;overflow:hidden;background:#fff;min-height:0;position:relative}
+  #frame{width:100%;height:100%;border:none;display:block;min-height:500px}
+  .footer{margin-top:8px;font-size:0.7rem;color:#006633;display:flex;justify-content:space-between;border-top:1px solid #00ff6622;padding-top:6px}
+  .error-box{background:#1a0000;color:#ff5555;padding:6px 12px;border:1px solid #ff3333;border-radius:4px;margin:4px 0;display:none;font-size:0.9rem}
+  .loading-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:999;display:none;justify-content:center;align-items:center;color:#00ff66;font-size:1.3rem;flex-direction:column;backdrop-filter:blur(4px)}
+  .loading-overlay.show{display:flex}
+  .spinner{border:5px solid #1a1a1a;border-top:5px solid #00ff66;border-radius:50%;width:60px;height:60px;animation:spin 0.9s linear infinite;margin-bottom:20px}
+  @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+  .gateway-badge{color:#00aa44}
+  .inline-select{background:#111;color:#00ff66;border:1px solid #00ff66;padding:4px 8px;border-radius:4px;font-family:inherit;font-size:0.8rem}
+  @media(max-width:600px){h1{font-size:1.2rem}#urlbar{min-width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <h1>◈ IMMORTAL · PROXY</h1>
+  <span class="badge">⚡ v2.0 · multi‑engine</span>
+</header>
+<div class="status-bar">
+  <span id="gatewayDisplay">🌐 gateway: auto</span>
+  <span id="backendDisplay">🖥️ backend: off</span>
+  <span id="modeDisplay">📱 mode: desktop</span>
+  <span><button class="btn small sec" id="modeToggle">toggle mobile</button></span>
+  <span><button class="btn small sec" id="clearCacheBtn">clear cache</button></span>
+</div>
+<div class="toolbar">
+  <input id="urlbar" type="text" placeholder="https://www.tiktok.com or youtube.com" value="https://www.tiktok.com">
+  <button class="btn" id="goBtn">▶ GO</button>
+  <button class="btn sec" id="homeBtn">🏠 home</button>
+  <button class="btn sec" id="backBtn">◀ back</button>
+</div>
+<div id="errorBox" class="error-box"></div>
+<div class="frame-wrap">
+  <iframe id="frame" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"></iframe>
+</div>
+<div class="footer">
+  <span>made by immortal · <span id="timeDisplay"></span></span>
+  <span>requests: <span id="reqCount">0</span></span>
+</div>
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <span id="loadText">Connecting...</span>
+</div>
+
+<script>
+(function(){
+  // ---- CONFIGURATION ----
+  const USER_AGENTS = {
+    desktop: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    mobile: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+  };
+  let currentMode = 'desktop'; // 'desktop' or 'mobile'
+
+  // Proxy gateways (public CORS proxies) – ranked by reliability
+  const GATEWAYS = [
+    { name: 'allorigins', url: 'https://api.allorigins.win/raw?url=', supportsPost: false },
+    { name: 'corsproxy.io', url: 'https://corsproxy.io/?', supportsPost: false },
+    { name: 'cors.sh', url: 'https://proxy.cors.sh/?', supportsPost: false },
+    { name: 'thingproxy', url: 'https://thingproxy.freeboard.io/fetch/', supportsPost: false },
+    { name: 'cors-anywhere', url: 'https://cors-anywhere.herokuapp.com/', supportsPost: true } // may have rate limits
+  ];
+  let currentGatewayIndex = 0;
+  let requestCount = 0;
+  let historyStack = [];
+
+  // ---- DOM refs ----
+  const urlInput = document.getElementById('urlbar');
+  const goBtn = document.getElementById('goBtn');
+  const homeBtn = document.getElementById('homeBtn');
+  const backBtn = document.getElementById('backBtn');
+  const frame = document.getElementById('frame');
+  const errorBox = document.getElementById('errorBox');
+  const gatewayDisplay = document.getElementById('gatewayDisplay');
+  const backendDisplay = document.getElementById('backendDisplay');
+  const modeDisplay = document.getElementById('modeDisplay');
+  const modeToggle = document.getElementById('modeToggle');
+  const clearCacheBtn = document.getElementById('clearCacheBtn');
+  const loadingOverlay = document.getElementById('loadingOverlay');
+  const loadText = document.getElementById('loadText');
+  const reqCountSpan = document.getElementById('reqCount');
+  const timeDisplay = document.getElementById('timeDisplay');
+
+  // ---- helpers ----
+  function showError(text, duration=7000) {
+    errorBox.style.display = 'block';
+    errorBox.textContent = '⚠ ' + text;
+    clearTimeout(errorBox._timer);
+    errorBox._timer = setTimeout(() => { errorBox.style.display = 'none'; }, duration);
+  }
+
+  function showLoading(show, msg='Fetching...') {
+    loadingOverlay.classList.toggle('show', show);
+    if (show) loadText.textContent = msg;
+  }
+
+  function updateGatewayLabel() {
+    const g = GATEWAYS[currentGatewayIndex % GATEWAYS.length];
+    gatewayDisplay.textContent = '🌐 gateway: ' + g.name;
+  }
+
+  function updateModeLabel() {
+    modeDisplay.textContent = '📱 mode: ' + currentMode;
+  }
+
+  function incrementRequests() {
+    requestCount++;
+    reqCountSpan.textContent = requestCount;
+  }
+
+  // ---- core proxy function ----
+  function loadUrl(rawUrl) {
+    let url = rawUrl.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    urlInput.value = url;
+    historyStack.push(url);
+    if (historyStack.length > 50) historyStack.shift();
+
+    // 1) Try backend (same-origin /fetch) if available
+    const backendUrl = '/fetch?url=' + encodeURIComponent(url);
+    showLoading(true, 'Trying backend...');
+    fetch(backendUrl, { 
+      method: 'GET', 
+      mode: 'same-origin',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Backend status ' + res.status);
+        return res.text();
+      })
+      .then(html => {
+        showLoading(false);
+        backendDisplay.textContent = '🖥️ backend: on';
+        injectHtml(html, url);
+        incrementRequests();
+      })
+      .catch(() => {
+        backendDisplay.textContent = '🖥️ backend: off';
+        showLoading(false);
+        // 2) Fallback to public gateways with intelligent retry
+        tryGateways(url);
+      });
+  }
+
+  function tryGateways(targetUrl, attempt=0) {
+    if (attempt >= GATEWAYS.length * 2) {
+      showError('All proxies failed. Loading directly (may be blocked).');
+      frame.src = targetUrl;
+      showLoading(false);
+      return;
+    }
+    const idx = attempt % GATEWAYS.length;
+    const gateway = GATEWAYS[idx];
+    const proxyUrl = gateway.url + encodeURIComponent(targetUrl);
+    showLoading(true, 'Using ' + gateway.name + '...');
+    updateGatewayLabel();
+
+    // Use fetch with appropriate headers
+    const fetchOptions = {
+      mode: 'cors',
+      headers: {
+        'User-Agent': USER_AGENTS[currentMode],
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    };
+    // For cors-anywhere, we may need to set Origin
+    if (gateway.name === 'cors-anywhere') {
+      fetchOptions.headers['Origin'] = window.location.origin;
+    }
+
+    fetch(proxyUrl, fetchOptions)
+      .then(res => {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        // Check content-type – if not HTML, try to handle as binary? For now treat as text.
+        return res.text();
+      })
+      .then(html => {
+        showLoading(false);
+        // Validate that we got HTML, not a JSON error
+        if (html.length < 100 && (html.includes('error') || html.includes('blocked'))) {
+          throw new Error('Gateway returned error page');
+        }
+        injectHtml(html, targetUrl);
+        incrementRequests();
+        currentGatewayIndex = idx; // remember last working gateway
+        updateGatewayLabel();
+      })
+      .catch(err => {
+        showLoading(false);
+        // Retry with next gateway
+        attempt++;
+        showError('Gateway ' + gateway.name + ' failed: ' + err.message + '. Retrying...', 3000);
+        setTimeout(() => tryGateways(targetUrl, attempt), 500);
+      });
+  }
+
+  function injectHtml(html, baseUrl) {
+    try {
+      // Rewrite relative links to absolute using base URL
+      // Also inject a <base> tag, but also manually fix common relative patterns
+      let processed = html;
+      // Insert base tag inside head if not present
+      if (!/<base\s+href=/i.test(processed)) {
+        processed = processed.replace(/<head>/i, `<head><base href="${baseUrl}">`);
+      }
+      // Additionally rewrite src/href without protocol or absolute path
+      processed = processed.replace(/(href|src|action)=["']([^"']*)["']/gi, (match, attr, val) => {
+        if (val.match(/^https?:\/\//)) return match;
+        if (val.startsWith('//')) return `${attr}="https:${val}"`;
+        if (val.startsWith('/')) return `${attr}="${new URL(baseUrl).origin}${val}"`;
+        if (val.startsWith('?')) return `${attr}="${new URL(baseUrl).origin}${new URL(baseUrl).pathname}${val}"`;
+        return `${attr}="${new URL(val, baseUrl).href}"`;
+      });
+
+      const doc = frame.contentDocument || frame.contentWindow.document;
+      doc.open();
+      doc.write(processed);
+      doc.close();
+    } catch (e) {
+      showError('Injection error: ' + e.message);
+      // Fallback: just set src
+      frame.src = baseUrl;
+    }
+  }
+
+  // ---- navigation events ----
+  goBtn.addEventListener('click', function() {
+    const val = urlInput.value.trim();
+    if (val) loadUrl(val);
+  });
+  urlInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') goBtn.click();
+  });
+  homeBtn.addEventListener('click', function() {
+    loadUrl('https://www.google.com');
+  });
+  backBtn.addEventListener('click', function() {
+    if (historyStack.length > 1) {
+      historyStack.pop(); // remove current
+      const prev = historyStack.pop();
+      if (prev) loadUrl(prev);
+    } else {
+      showError('No history');
+    }
+  });
+
+  // ---- mode toggle ----
+  modeToggle.addEventListener('click', function() {
+    currentMode = (currentMode === 'desktop') ? 'mobile' : 'desktop';
+    updateModeLabel();
+    showError('Switched to ' + currentMode + ' mode. Reload page to apply.', 2000);
+  });
+
+  // ---- clear cache (force reload) ----
+  clearCacheBtn.addEventListener('click', function() {
+    const current = urlInput.value.trim();
+    if (current) {
+      // Reload with cache-busting
+      loadUrl(current + (current.includes('?') ? '&_cb=' : '?_cb=') + Date.now());
+    }
+  });
+
+  // ---- auto-load on start ----
+  window.addEventListener('load', function() {
+    // Detect backend
+    fetch('/fetch?url=https://example.com', { method: 'HEAD', mode: 'same-origin' })
+      .then(() => { backendDisplay.textContent = '🖥️ backend: on'; })
+      .catch(() => { /* keep off */ });
+
+    // Load default (TikTok)
+    loadUrl('https://www.tiktok.com');
+    updateModeLabel();
+    updateGatewayLabel();
+
+    // Clock
+    setInterval(() => {
+      timeDisplay.textContent = new Date().toLocaleTimeString();
+    }, 1000);
+  });
+
+  // ---- anti-detection for iframe ----
+  Object.defineProperty(navigator, 'webdriver', { get: () => false });
+  Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
+  // Remove phantomjs and headless traces
+  delete window._phantom;
+  delete window.callPhantom;
+  // Override navigator.languages
+  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+
+  // ---- iframe load error handler ----
+  frame.addEventListener('error', function() {
+    showError('Iframe failed to load. Try using the backend.');
+  });
+
+  // ---- expose reload function to iframe if needed (optional) ----
+  console.log('Immortal Proxy v2 loaded. Type loadUrl("url") in console.');
+})();
+</script>
+</body>
+</html>
